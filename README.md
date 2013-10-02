@@ -29,7 +29,7 @@ the `cache.json` should allow to:
 - while displaying:
   - fast check if the path requested does exist.
 
-the github API is returning a flati list with the following structure:
+the github API is returning a flat list with the following structure:
     [i] => Array
         (
             [mode] => 100644
@@ -89,13 +89,17 @@ compiling the TOC:
 
 #TODO
 
-- create a cache/cache.json:
-  - with a list of the manuals and files
-  - the hash for each file
+- add errors from `ensure_file_writable()`, `file_put_cache_json()` and `file_get_cache_json()` in a log.
+- give a warning if a [lang] => title is published but there is no corresponding file.
+  - it's probably better to write a script that just checks different things about the toc entries and the files:
+    - toc entries with children but no text.
+    - toc entries with no children nor text.
+    - files that are in git but in the toc.
+- check that hash are checked and that only the files to be updated are downloaded.
+- optionally also show the other languages in the toc
 - remove from the cache the files that do not exist anymore in the github repository
-- allow multiple level of directories
 - make an interface that can create (install) and edit the config.js of the site
-- is there a way to validate a json through php (or js)?
 - how to choose the current language?
 - define how to bind the images into the `book.yaml`
-- when parsing the markdow, pick the images used, and add them to the files to be downloaded (probably in a second list (`resources_github`) so that they don't get downloaded twice).
+  - when parsing the markdown, pick the images used, and add them to the files to be downloaded (probably in a second list (`resources_github`) so that they don't get downloaded twice).
+- create a php application that provides the same API as github and delivers files in the same way per http.

@@ -1,11 +1,26 @@
 <?php
 ini_set('display_errors', '1');
 error_reporting(E_ALL);
+    
+include_once("spyc.php");
+include_once("markdown.php");
 
 function debug($label, $value) {
     echo("<p>$label<br /><pre>".htmlentities(print_r($value, 1))."</pre></p>");
 }
 
+class Manual_log {
+    public static $warning = array();
+    public static $error = array();
+    public static function render() {
+        foreach (self::$error as $item) {
+            echo('<p class="error">'.$item.'</p>');
+        }
+        foreach (self::$warning as $item) {
+            echo('<p class="warning">'.$item.'</p>');
+        }
+    }
+}
 
 define('MANUAL_BASE_PATH', dirname(dirname($_SERVER['SCRIPT_FILENAME'])).'/');
 // debug('MANUAL_BASE_PATH', MANUAL_BASE_PATH);
@@ -21,85 +36,86 @@ define('MANUAL_HTTP_UPDATE_URL', MANUAL_HTTP_ENGINE_URL.'update.php');
 // define('MANUAL_MODREWRITE_ENABLED', array_key_exists('HTTP_MOD_REWRITE', $_SERVER));
 define('MANUAL_MODREWRITE_ENABLED', true);
 define('MANUAL_GITHUB_NOREQUEST', true); // set to true for debugging purposes only
+define('MANUAL_DEBUG_NO_HTTP_REQUEST', true); // set to true for debugging purposes only
 define('MANUAL_FORCE_UPDATE', false); // for debugging purposes only
-define('MANUAL_STORE_NOUPDATE', true); // set to true for debugging purposes only
 
+define('MANUAL_CACHE_GITHUB_FILE', 'cache.json');
+define('MANUAL_SOURCE_BOOK_FILE', 'book.yaml');
+define('MANUAL_CACHE_TOC_FILE', 'toc.json');
 define('MANUAL_CACHE_LANGUAGE_FILE', 'language.json');
+define('MANUAL_CACHE_SECTION_FILE', 'section.json');
 define('MANUAL_CACHE_TOC_HTML_FILE', 'toc_html.json');
 
 // debug('apache get_env', apache_getenv('HTTP_MOD_REWRITE'));
 
-if (is_file(MANUAL_CONFIG_FILE)) {
-    $config = json_decode(file_get_contents(MANUAL_CONFIG_FILE), 1);
-} else {
-    // header('Location: '.pathinfo($_SERVER['SCRIPT_NAME'], PATHINFO_DIRNAME).'/'.'install.php');
-}
-// debug('config', $config);
-?>
-<html>
-<head>
-<title><?= $config['title'] ?></title>
-<style>
-    .warning {background-color:yellow;}
-</style>
-</head>
-<body>
-<h1><?= $config['title'] ?> Update</h1>
-
-<?php
-if (file_exists('install.php')) {
-    echo('<p class="warning">You should remove the <a href="install.php">install file</a>.</p>');
-}
-
-function get_cache($manual_id) {
-    $result = array();
-    $cache_path = MANUAL_CACHE_PATH.$manual_id.'/';
-    if (!file_exists($cache_path)) {
-        mkdir($cache_path);
+function ensure_directory_writable($path, $base_path = '') {
+    $result = false;
+    if ($base_path != '') {
+        $base_path = rtrim($base_path, '/').'/';
+        $path = trim(substr($path, count($base_path) -1), '/');
     }
-
-    if (file_exists($cache_path.MANUAL_CACHE_FILE)) {
-        $result = json_decode(file_get_contents($cache_path.MANUAL_CACHE_FILE));
-    }
-    if (empty($result)) {
-        $result = array (
-            'title' => array (),
-            'toc' => array (),
-        );
+    if (file_exists($base_path.$path)) {
+        $result = is_dir($base_path.$path) && is_writable($base_path.$path);
+    } else {
+        $result = true;
+        $path_item = $base_path;
+        foreach (explode('/', $path) as $item) {
+            $path_item .= $item.'/';
+            if (!file_exists($path_item)) {
+                $result = mkdir($path_item);
+            } else {
+                $result = is_dir($path_item);
+            }
+            if (!$result) {
+                break;
+            }
+        }
+        $result &= is_writable($base_path.$path);
     }
     return $result;
 }
 
-function & array_get_item(&$tree, $path) {
-    $path = $path == '.' ? array() : $path;
-    $path = is_array($path) ? $path : explode('/', $path);
-    $current = &$tree;
-    foreach ($path as $item) {
-        if (!isset($current[$item])) {
-            $current[$item] = array();
-        }
-        $current = &$current[$item];
-    }
-    return $current;
-}
-
 /**
- * sets the value into the tree, based on the path.
+ * check if the file is writable and if not, check that the directories leading to it do exist or can
+ * be created
+ * @param string $path the path, inclusive the file name, separated by /.
+ * it must be a relative path starting from the current directory or from $base_path when defined.
+ * @param string $path the part of the path where it should not create directories.
  */
-/*
-function array_set(&$tree, $path, $value) {
-    $path = $path == '.' ? array() : $path;
-    $path = is_array($path) ? $path : explode('/', $path);
-    $current = &$tree;
-    foreach ($path as $item) {
-        if (!isset($current[$item])) {
-            $current[$item] = array();
-        }
-        $current = &$current[$item];
+function ensure_file_writable($path, $base_path = '') {
+    $result = false;
+    if ($base_path != '') {
+        $base_path = rtrim($base_path, '/').'/';
+        $path = trim(substr($path, count($base_path) - 1), '/');
     }
-    $current[$value['filename']] = $value;
-}
-*/
+    if (file_exists($base_path.$path)) {
+        $result = is_file($base_path.$path) && is_writable($base_path.$path);
+    } else {
+        $result = ensure_directory_writable(dirname($path), $base_path);
+    }
+    return $result;
+} // ensure_file_writable
+
+function put_cache_json($path, $content, $manual_id = null) {
+    $result = false;
+    $path_cache = (isset($manual_id) ? $manual_id.'/' : '').$path;
+    if (ensure_file_writable($path_cache, MANUAL_CACHE_PATH)) {
+        file_put_contents(MANUAL_CACHE_PATH.$path_cache, json_encode($content));
+    }
+    return $result;
+} // file_put_cache_json()
+
+function get_cache_json($path, $manual_id = null) {
+    $result = array();
+    $path_cache = (isset($manual_id) ? $manual_id.'/' : '').$path;
+    if (file_exists(MANUAL_CACHE_PATH.$path_cache)) {
+        $result = json_decode(file_get_contents(MANUAL_CACHE_PATH.$path_cache), true);
+        if ($result === false) {
+            $result = array();
+        }
+    }
+    return $result;
+} // file_get_cache_json()
 
 function get_content_from_github($url) {
     $ch = curl_init();
@@ -113,7 +129,7 @@ function get_content_from_github($url) {
     // debug('curl getinfo', curl_getinfo($ch));
     curl_close($ch);
     return $content;
-}
+} // get_content_from_github()
 
 function get_github_file_list($user) {
     $result = array();
@@ -121,14 +137,25 @@ function get_github_file_list($user) {
         $result = get_content_from_github(GITHUB_URL);
         file_put_contents("content_github.json", $result);
     } else {
-        echo('<p class="warning">Requests are from the cache: queries to GitHub are disabled.</p>');
         $result = file_get_contents("content_github.json");
     }
     $result = json_decode($result, true);
 
     // debug('result', $result);
     return $result;
-}
+} // get_github_file_list()
+
+function get_cache($manual_id) {
+    $result = array();
+    $result = get_cache_json(MANUAL_CACHE_FILE, $manual_id);
+    if (empty($result)) {
+        $result = array (
+            'title' => array (),
+            'toc' => array (),
+        );
+    }
+    return $result;
+} // get_cache()
 
 /**
  * get a nested toc, that will be stored in the toc.json file and will be used to generate the html toc
@@ -212,75 +239,96 @@ function get_language($toc, $cache) {
         }
     }
     return $result;
-}
+} // get_language()
 
 /**
- * get list of files to be downloaded from github
+ * return the list of files that are published
  */
-function get_file_download($toc, $cache) {
+function get_book_files($book_toc, $cache) {
     $result = array();
-    foreach ($toc as $item) {
+    foreach ($book_toc as $item) {
         // TODO: only do this if it's not in the book_toc from the cache or it is in the cache_update
-        $active = false;
+        // debug('item', $item);
+        $published = array();
         foreach ($item['title'] as $key => $value) {
-            $filename = $item['directory'].'-'.$key.'.md';
-            $path = $item['directory'].'/'.$filename;
+            $filename_md = $item['directory'].'-'.$key.'.md';
+            $filename_html = $item['directory'].'-'.$key.'.html';
             if (is_published($item, $key, $cache)) {
-                $result[] = $path;
+                $published[$key] = array(
+                    'raw' => $item['directory'].'/'.$filename_md,
+                    'render' => array (
+                        'source' => 'md',
+                        'target' => 'html',
+                        'filename' => $item['directory'].'/'.$filename_html,
+                    ),
+                );
             }
         }
+        $items = array();
         if (!empty($item['items'])) {
-            $result = array_merge($result, get_file_download($item['items'], $cache));
+            $items = get_book_files($item['items'], $cache);
+        }
+        if (!empty($published) || !empty($items)) {
+            $result[$item['directory']] = array (
+                'published' => $published,
+            );
+            $result = array_merge($result, $items);
         }
     }
     return $result;
-} // get_file_download()
+} // get_book_files()
+
 
 /**
  * download the files from github
  */
-function downlad_files($file, $cache_path) {
-    foreach ($file as $item) {
-        // debug('item', $item);
-        if (!MANUAL_STORE_NOUPDATE) {
-            $content = get_content_from_github(GITHUB_URL_RAW.$item);
-        } else {
-            $content = "# Introduction";
-        }
-        // debug('content', $content);
-
-        $cache_filename = $item;
-        if (pathinfo($item, PATHINFO_EXTENSION) == 'md') {
-            $content = Markdown($content);
-            $cache_filename = substr($cache_filename, 0, -3).'.html';
-        }
-        // debug('content', $content);
-        // debug('cache_path', $cache_path);
-        $cache_section_path = $cache_path;
-        // debug('cache_section_path', $cache_section_path);
-        foreach (array_slice(explode('/', $item), 0, -1) as $iitem) {
-            // debug('iitem', $iitem);
-            $cache_section_path .= $iitem.'/';
-            // debug('cache_path', $cache_path);
-            if (!file_exists($cache_section_path)) {
-                mkdir($cache_section_path);
+function downlad_files($file, $manual_id) {
+    foreach ($file as $key => $value) {
+        // debug('value', $value);
+        foreach ($value['published'] as $kkey => $vvalue) {
+            // debug('vvalue', $vvalue);
+            if (!MANUAL_DEBUG_NO_HTTP_REQUEST) {
+                $content = get_content_from_github(GITHUB_URL_RAW.$vvalue['raw']);
+            } else {
+                $content = "# Introduction";
             }
-        }
-        // debug('cache_path', $cache_path);
-        // debug('filename', $filename);
-        if (is_dir($cache_section_path) && is_writable($cache_section_path)) {
-            file_put_contents($cache_path.$cache_filename, $content);
+            // debug('content', $content);
+            $cache_filename = $vvalue['raw'];
+            if (
+                array_key_exists('render', $vvalue) &&
+                ($vvalue['render']['source'] == 'md') && 
+                ($vvalue['render']['target'] == 'html')
+            ) {
+                $content = Markdown($content);
+                $cache_filename = $vvalue['render']['filename'];
+            }
+            // debug('content', $content);
+            put_cache_json($cache_filename, $content, $manual_id);
         }
     }
+} // downlad_files()
+
+if (!MANUAL_GITHUB_NOREQUEST) {
+    Manual_log::$warning[] = 'Requests are from the cache: queries to GitHub are disabled.';
 }
 
+if (is_file(MANUAL_CONFIG_FILE)) {
+    $config = json_decode(file_get_contents(MANUAL_CONFIG_FILE), true);
+} else {
+    header('Location: '.pathinfo($_SERVER['SCRIPT_NAME'], PATHINFO_DIRNAME).'/'.'configure.php');
+}
+
+if (!ensure_directory_writable(MANUAL_CACHE_PATH)) {
+    Manual_log::$error[] = 'cache is not writable';
+}
+// debug('config', $config);
+if (file_exists('install.php')) {
+    Manual_log::$warning[] = 'You should remove the <a href="install.php">install file</a>.';
+}
 
 if (array_key_exists('man', $_REQUEST) && array_key_exists($_REQUEST['man'], $config['manual'])) {
-
     $manual_id = $_REQUEST['man'];
-
-    $cache = get_cache($manual_id);
-    // debug('cache', $cache);
+    ensure_directory_writable(MANUAL_CACHE_PATH.$manual_id);
 
     $config_manual = $config['manual'][$manual_id];
     // debug('config_manual', $config_manual);
@@ -300,10 +348,15 @@ if (array_key_exists('man', $_REQUEST) && array_key_exists($_REQUEST['man'], $co
         )
     ));
 
+    $cache = get_cache($manual_id);
+    // debug('cache', $cache);
+
     $content_github = get_github_file_list($config_manual['git_user']);
+    // debug('content_github', $content_github);
+
+    // $cache_path = MANUAL_CACHE_PATH.$manual_id.'/';
 
     // check each file on github, compare it to the cache
-    $update_time = time();
     $cache_update = array();
     foreach ($content_github['tree'] as $item) {
         if (!array_key_exists($item['path'], $cache)) {
@@ -317,31 +370,26 @@ if (array_key_exists('man', $_REQUEST) && array_key_exists($_REQUEST['man'], $co
                 'path' => $item['path'],
             );
             $cache[$item['path']] = $item;
+            // TODO: check against the old cache
             $cache_update[$item['path']] = $item;
         }
     }
-
+    put_cache_json(MANUAL_CACHE_GITHUB_FILE, $cache, $manual_id);
     // debug('cache', $cache);
     // debug('cache_update', $cache_update);
 
-    // TODO: in get_cache() we are making sure that $cache_path exists... but i'm not sure it's a good idea!
-    $cache_path = MANUAL_CACHE_PATH.$manual_id.'/';
-    
-    // TODO: define a constant for book.yaml
-    include_once("spyc.php");
-    $toc_update = false;
-    if (array_key_exists('book.yaml', $cache_update)) {
-        if (!MANUAL_STORE_NOUPDATE) {
-            $book = get_content_from_github(GITHUB_URL_RAW.'book.yaml');
+    if (array_key_exists(MANUAL_SOURCE_BOOK_FILE, $cache_update)) {
+        if (!MANUAL_DEBUG_NO_HTTP_REQUEST) {
+            $book = get_content_from_github(GITHUB_URL_RAW.MANUAL_SOURCE_BOOK_FILE);
         } else {
             $book = file_get_contents('book_github.yaml');
         }
         // file_put_contents($cache_path.'book.yaml', $book);
-        $toc_update = true;
+        $book = Spyc::YAMLLoadString($book);
+        put_cache_json(MANUAL_CACHE_TOC_FILE, $book, $manual_id);
     } else {
-        file_get_contents($cache_path.'book.yaml');
+        $book = get_cache_json(MANUAL_CACHE_TOC_FILE, $manual_id);
     }
-    $book = Spyc::YAMLLoadString($book);
     // debug('book', $book);
 
     // TODO: first read the book_toc from the cache
@@ -349,31 +397,47 @@ if (array_key_exists('man', $_REQUEST) && array_key_exists($_REQUEST['man'], $co
     $book_toc = get_toc($book['toc']);
     // debug('book_toc', $book_toc);
 
+    $book_files = get_book_files($book_toc, $cache);
+    // debug('book_files', $book_files);
+    put_cache_json(MANUAL_CACHE_SECTION_FILE, $book_files, $manual_id);
+
     $book_language = get_language($book_toc, $cache);
     // debug('book_language', $book_language);
+    put_cache_json(MANUAL_CACHE_LANGUAGE_FILE, $book_language, $manual_id);
 
-    $file_download = get_file_download($book_toc, $cache);
-    // debug('file_download', $file_download);
-
-    include_once("markdown.php");
-
-    file_put_contents($cache_path.MANUAL_CACHE_LANGUAGE_FILE, json_encode($book_language));
-
-    downlad_files($file_download, $cache_path);
+    downlad_files($book_files, $manual_id);
 
     $book_toc_html = array();
     foreach (array_keys($book_language) as $item) {
         $book_toc_html[$item] = get_toc_html($book_toc, $manual_id, $item);
     }
     // debug('book_toc_html', $book_toc_html);
-    file_put_contents($cache_path.MANUAL_CACHE_TOC_HTML_FILE, json_encode($book_toc_html));
+    put_cache_json(MANUAL_CACHE_TOC_HTML_FILE, $book_toc_html, $manual_id);
 
 } // if man in request
 
 $rate_limit = json_decode(get_content_from_github("https://api.github.com/rate_limit"));
 // debug('rate_limit', $rate_limit);
 
-echo("<p>".$rate_limit->rate->remaining." hits remaining out of ".$rate_limit->rate->limit." for the next hour.</p>");
+?>
+<html>
+<head>
+<title><?= $config['title'] ?></title>
+<style>
+    .warning {background-color:yellow;}
+    .error {background-color:orange;}
+</style>
+</head>
+<body>
+<h1><?= $config['title'] ?> Update</h1>
+
+<?php
+
+Manual_log::render();
+
+if ($rate_limit) {
+    echo("<p>".$rate_limit->rate->remaining." hits remaining out of ".$rate_limit->rate->limit." for the next hour.</p>");
+}
 
 $form_manual_checkbox = array();
 

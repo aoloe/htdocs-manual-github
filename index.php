@@ -35,8 +35,9 @@ define('MANUAL_LIST_PATH', dirname($_SERVER['SCRIPT_FILENAME']).'list.json'); //
 define('MANUAL_CACHE_PATH', dirname($_SERVER['SCRIPT_FILENAME']).'/cache/');
 
 
-// share this with update.php
+// share this with update.php -> config.php
 define('MANUAL_CACHE_TOC_HTML_FILE', 'toc_html.json');
+define('MANUAL_CACHE_SECTION_FILE', 'section.json');
 
 
 if (is_file(MANUAL_CONTENT_PATH) && is_file(MANUAL_LIST_PATH)) {
@@ -127,23 +128,60 @@ echo(strtr(
 
 
 // TODO: set it as cookie
-$lang = array_key_exists('lang', $_REQUEST) ? $_REQUEST['lang'] : MANUAL_LANG_DEFAULT;
+$language = array_key_exists('lang', $_REQUEST) ? $_REQUEST['lang'] : MANUAL_LANG_DEFAULT;
 
+function get_config_manual($config, $man) {
+    $result = null;
+    // debug('config', $config);
+    if (array_key_exists($man, $config['manual'])) {
+        $result = $config['manual'];
+    }
+    return $result;
+} // get_config_manual()
+
+function get_page($section, $manual_id, $page_id, $language) {
+    $result = null;
+    // debug('language', $language);
+    // debug('section', $section);
+    if (array_key_exists($page_id, $section) && array_key_exists($language, $section[$page_id]['published'])) {
+        $item = $section[$page_id]['published'][$language];
+        $filename = 'cache/'.$manual_id.'/'.(array_key_exists('render', $item) ? $item['render']['filename'] : $item['raw']);
+        $result = file_get_contents($filename);
+    }
+    return $result;
+}
 
 // TODO: check if man and page are defined in an index! --> check it from cache.json
-if (array_key_exists('man', $_REQUEST)) :
-    $book_toc_html = json_decode(file_get_contents(MANUAL_CACHE_PATH.$_REQUEST['man'].'/'.MANUAL_CACHE_TOC_HTML_FILE), true);
+$manual_id = null;
+$config_manual = null;
+$page_id = null;
+$page = null;
+
+if (array_key_exists('man', $_REQUEST)) {
+    $manual_id = $_REQUEST['man'];
+    $config_manual = get_config_manual($config, $manual_id);
+}
+
+// debug('config_manual', $config_manual);
+if (isset($config_manual)) :
+
+    $book_section = json_decode(file_get_contents(MANUAL_CACHE_PATH.$manual_id.'/'.MANUAL_CACHE_SECTION_FILE), true);
+    $book_toc_html = json_decode(file_get_contents(MANUAL_CACHE_PATH.$manual_id.'/'.MANUAL_CACHE_TOC_HTML_FILE), true);
     // debug('book_toc_html', $book_toc_html);
-    if (array_key_exists('page', $_REQUEST)) :
-        echo(file_get_contents('cache/'.$_REQUEST['man'].'/'.$_REQUEST['page'].'/'.$_REQUEST['page'].'-'.$lang.'.html'));
+    if (array_key_exists('section', $_REQUEST)) {
+        $page_id = $_REQUEST['section'];
+        $page = get_page($book_section, $manual_id, $page_id, $language);
+    }
+    if (isset($page)) :
+            echo($page);
     else :
-        echo($book_toc_html[$lang]);
+        echo($book_toc_html[$language]);
     endif;
 else :
     echo("<ul>\n");
     foreach ($config['manual'] as $key => $value) :
-        if (array_key_exists($lang, $value['title'])) :
-            echo("<li><a href=\"".MANUAL_HTTP_URL."?man=".$key."&lang=$lang\">".$value['title'][$lang]."</a></li>\n");
+        if (array_key_exists($language, $value['title'])) :
+            echo("<li><a href=\"".MANUAL_HTTP_URL."?man=".$key."&lang=$language\">".$value['title'][$language]."</a></li>\n");
         endif;
     endforeach;
     echo("</ul>\n");
