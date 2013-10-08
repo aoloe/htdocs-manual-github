@@ -103,3 +103,5 @@ compiling the TOC:
 - define how to bind the images into the `book.yaml`
   - when parsing the markdown, pick the images used, and add them to the files to be downloaded (probably in a second list (`resources_github`) so that they don't get downloaded twice).
 - create a php application that provides the same API as github and delivers files in the same way per http.
+- find a markdown editor:
+  - http://benweet.github.io/stackedit/# web based
