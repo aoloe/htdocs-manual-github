@@ -105,3 +105,4 @@ compiling the TOC:
 - create a php application that provides the same API as github and delivers files in the same way per http.
 - find a markdown editor:
   - http://benweet.github.io/stackedit/# web based
+  - https://news.ycombinator.com/item?id=6512704
