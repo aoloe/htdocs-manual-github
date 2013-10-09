@@ -34,10 +34,10 @@ define('MANUAL_HTTP_URL', sprintf('http://%s%s/', $_SERVER['SERVER_NAME'], dirna
 define('MANUAL_HTTP_ENGINE_URL', sprintf('http://%s%s/', $_SERVER['SERVER_NAME'], pathinfo($_SERVER['REQUEST_URI'], PATHINFO_DIRNAME)));
 define('MANUAL_HTTP_UPDATE_URL', MANUAL_HTTP_ENGINE_URL.'update.php');
 // define('MANUAL_MODREWRITE_ENABLED', array_key_exists('HTTP_MOD_REWRITE', $_SERVER));
-define('MANUAL_MODREWRITE_ENABLED', true);
-define('MANUAL_GITHUB_NOREQUEST', true); // set to true for debugging purposes only
-define('MANUAL_DEBUG_NO_HTTP_REQUEST', true); // set to true for debugging purposes only
-define('MANUAL_FORCE_UPDATE', false); // for debugging purposes only
+define('MANUAL_MODREWRITE_ENABLED', true); // TODO: not used yet
+define('MANUAL_GITHUB_NOREQUEST', false); // set to true for debugging purposes only
+define('MANUAL_DEBUG_NO_HTTP_REQUEST',false); // set to true for debugging purposes only
+define('MANUAL_FORCE_UPDATE', true); // for debugging purposes only
 
 define('MANUAL_CACHE_GITHUB_FILE', 'cache.json');
 define('MANUAL_SOURCE_BOOK_FILE', 'book.yaml');
@@ -96,13 +96,17 @@ function ensure_file_writable($path, $base_path = '') {
     return $result;
 } // ensure_file_writable
 
-function put_cache_json($path, $content, $manual_id = null) {
+function put_cache($path, $content, $manual_id = null) {
     $result = false;
     $path_cache = (isset($manual_id) ? $manual_id.'/' : '').$path;
     if (ensure_file_writable($path_cache, MANUAL_CACHE_PATH)) {
-        file_put_contents(MANUAL_CACHE_PATH.$path_cache, json_encode($content));
+        file_put_contents(MANUAL_CACHE_PATH.$path_cache, $content);
     }
     return $result;
+} // file_put_cache_json()
+
+function put_cache_json($path, $content, $manual_id = null) {
+    return put_cache($path, json_encode($content), $manual_id);
 } // file_put_cache_json()
 
 function get_cache_json($path, $manual_id = null) {
@@ -303,7 +307,7 @@ function downlad_files($file, $manual_id) {
                 $cache_filename = $vvalue['render']['filename'];
             }
             // debug('content', $content);
-            put_cache_json($cache_filename, $content, $manual_id);
+            put_cache($cache_filename, $content, $manual_id);
         }
     }
 } // downlad_files()

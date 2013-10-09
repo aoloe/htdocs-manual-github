@@ -102,4 +102,5 @@ compiling the TOC:
 - how to choose the current language?
 - define how to bind the images into the `book.yaml`
   - when parsing the markdown, pick the images used, and add them to the files to be downloaded (probably in a second list (`resources_github`) so that they don't get downloaded twice).
+  - images can have a translation and/or a -web/-print extension. if they exist pick them before converting to html!
 - create a php application that provides the same API as github and delivers files in the same way per http.
