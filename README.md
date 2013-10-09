@@ -104,3 +104,6 @@ compiling the TOC:
   - when parsing the markdown, pick the images used, and add them to the files to be downloaded (probably in a second list (`resources_github`) so that they don't get downloaded twice).
   - images can have a translation and/or a -web/-print extension. if they exist pick them before converting to html!
 - create a php application that provides the same API as github and delivers files in the same way per http.
+- find a markdown editor:
+  - http://benweet.github.io/stackedit/# web based
+  - https://news.ycombinator.com/item?id=6512704
