@@ -87,8 +87,22 @@ compiling the TOC:
 - producing a `toc.json` that will be used to render the TOC in `index.php`
 - retains all the items in toc.yaml, but marks 
 
+# Manual's file structure
+
+- the main directory must contain:
+  - `book.yaml`
+  - `README.md` (or any other extension or no extension)
+  - `LICENSE.md` (or any other extension or no extension)
+  - a `resource` (or any other extension or no extension)
+  - a `chapter` directory
+    - each directory in the `chapter` directory is a chapter
+    - each chapter directory contain a set of main file named after the directory's name plus an "extension" with the language code.
+
+
 #TODO
 
+- create a PHP API compatible with github that can be used for testing (local repository + repository with tests).
+- config option to set the branch to be fetched from github.
 - add errors from `ensure_file_writable()`, `file_put_cache_json()` and `file_get_cache_json()` in a log.
 - give a warning if a [lang] => title is published but there is no corresponding file.
   - it's probably better to write a script that just checks different things about the toc entries and the files:
@@ -107,3 +121,4 @@ compiling the TOC:
 - find a markdown editor:
   - http://benweet.github.io/stackedit/# web based
   - https://news.ycombinator.com/item?id=6512704
+- correctly set the path to the images (currently `str_replaced` in md when detecting the list of images)

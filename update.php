@@ -22,29 +22,14 @@ class Manual_log {
     }
 }
 
-define('MANUAL_BASE_PATH', dirname(dirname($_SERVER['SCRIPT_FILENAME'])).'/');
-// debug('MANUAL_BASE_PATH', MANUAL_BASE_PATH);
+include('config.php');
 
-
-define('MANUAL_CONFIG_FILE', MANUAL_BASE_PATH.'config.json');
-define('MANUAL_CACHE_PATH', MANUAL_BASE_PATH.'cache/');
-define('MANUAL_CACHE_FILE', 'cache.json');
-
-define('MANUAL_HTTP_URL', sprintf('http://%s%s/', $_SERVER['SERVER_NAME'], dirname(pathinfo($_SERVER['REQUEST_URI'], PATHINFO_DIRNAME))));
-define('MANUAL_HTTP_ENGINE_URL', sprintf('http://%s%s/', $_SERVER['SERVER_NAME'], pathinfo($_SERVER['REQUEST_URI'], PATHINFO_DIRNAME)));
-define('MANUAL_HTTP_UPDATE_URL', MANUAL_HTTP_ENGINE_URL.'update.php');
 // define('MANUAL_MODREWRITE_ENABLED', array_key_exists('HTTP_MOD_REWRITE', $_SERVER));
 define('MANUAL_MODREWRITE_ENABLED', true); // TODO: not used yet
-define('MANUAL_GITHUB_NOREQUEST', false); // set to true for debugging purposes only
-define('MANUAL_DEBUG_NO_HTTP_REQUEST',false); // set to true for debugging purposes only
-define('MANUAL_FORCE_UPDATE', true); // for debugging purposes only
+define('MANUAL_DEBUG_NO_FILELIST_REQUEST', false); // set to true for debugging purposes only
+define('MANUAL_DEBUG_NO_HTTP_REQUEST', false); // set to true for debugging purposes only
+define('MANUAL_FORCE_UPDATE', true); // set to true for debugging purposes only
 
-define('MANUAL_CACHE_GITHUB_FILE', 'cache.json');
-define('MANUAL_SOURCE_BOOK_FILE', 'book.yaml');
-define('MANUAL_CACHE_TOC_FILE', 'toc.json');
-define('MANUAL_CACHE_LANGUAGE_FILE', 'language.json');
-define('MANUAL_CACHE_SECTION_FILE', 'section.json');
-define('MANUAL_CACHE_TOC_HTML_FILE', 'toc_html.json');
 
 // debug('apache get_env', apache_getenv('HTTP_MOD_REWRITE'));
 
@@ -63,6 +48,7 @@ function ensure_directory_writable($path, $base_path = '') {
             $path_item .= $item.'/';
             if (!file_exists($path_item)) {
                 $result = mkdir($path_item);
+                // if (!$result) debug('path_item', $path_item);
             } else {
                 $result = is_dir($path_item);
             }
@@ -103,55 +89,114 @@ function put_cache($path, $content, $manual_id = null) {
         file_put_contents(MANUAL_CACHE_PATH.$path_cache, $content);
     }
     return $result;
-} // file_put_cache_json()
+} // put_cache()
 
 function put_cache_json($path, $content, $manual_id = null) {
     return put_cache($path, json_encode($content), $manual_id);
-} // file_put_cache_json()
+} // put_cache_json()
 
 function get_cache_json($path, $manual_id = null) {
     $result = array();
     $path_cache = (isset($manual_id) ? $manual_id.'/' : '').$path;
+    // debug('path_cache', $path_cache);
     if (file_exists(MANUAL_CACHE_PATH.$path_cache)) {
         $result = json_decode(file_get_contents(MANUAL_CACHE_PATH.$path_cache), true);
         if ($result === false) {
             $result = array();
         }
     }
+    // debug('get_cache_json result', $result);
     return $result;
-} // file_get_cache_json()
+} // get_cache_json()
 
 function get_content_from_github($url) {
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_HEADER, 0);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_BINARYTRANSFER,1);
     curl_setopt($ch, CURLOPT_TIMEOUT, 30);
     // curl_setopt($ch, CURLOPT_HEADER, true);
     // curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
-    // curl_setopt($ch, CURLOPT_VERBOSE, true);
+    curl_setopt($ch, CURLOPT_VERBOSE, true);
     $content = curl_exec($ch);
     // debug('curl getinfo', curl_getinfo($ch));
     curl_close($ch);
+    // debug('content', $content);
     return $content;
 } // get_content_from_github()
 
-function get_github_file_list($user) {
+/**
+ * get the list of files in the github repository through the github API
+ */
+function get_github_file_list($manual_id) {
     $result = array();
-    if (!MANUAL_GITHUB_NOREQUEST) {
-        $result = get_content_from_github(GITHUB_URL);
-        file_put_contents("content_github.json", $result);
+    if (!MANUAL_DEBUG_NO_FILELIST_REQUEST) {
+        $result = json_decode(get_content_from_github(GITHUB_FILESLIST_URL), true);
+        put_cache_json('content_github.json', $result, $manual_id);
     } else {
-        $result = file_get_contents("content_github.json");
+        $result = get_cache_json('content_github.json', $manual_id);
     }
-    $result = json_decode($result, true);
-
-    // debug('result', $result);
+    // debug('get_github_file_list result', $result);
     return $result;
 } // get_github_file_list()
 
+/**
+ * read the tree list returned by github and distribute them by chapter
+ */
+function get_github_file_structure($list) {
+    $result = array();
+    foreach ($list as $key => $value) {
+        $path_segment = explode('/', $value['path']);
+        // read the "content" directory
+        if ((count($path_segment) >= 2) && (reset($path_segment) == 'content')) {
+            // debug('value', $value);
+            $path_segment = array_slice($path_segment, 1);
+            // debug('path_segment', $path_segment);
+            if ($value['type'] == 'tree') {
+                if (count($path_segment) == 1) {
+                    // add the directory in the first level of the repository as chapters
+                    $result[$path_segment[0]] = array (
+                        'item' => array(),
+                    );
+                }
+            } elseif ($value['type'] == 'blob') {
+                $pathinfo = pathinfo(implode('/', $path_segment));
+                // debug('pathinfo', $pathinfo);
+                if ($pathinfo['filename'] == 'README') {
+                } else {
+                    // get the main chapter files
+                    if (count($path_segment) == 2) {
+                        // debug('content file path_segment', $path_segment);
+                        $pathinfo = pathinfo($path_segment[1]);
+                        // debug('pathinfo', $pathinfo);
+                        if ($pathinfo['extension'] == 'md') { // TODO: accept also other extensions
+                            $fileinfo = explode('-', $pathinfo['filename']);
+                            // debug('fileinfo', $fileinfo);
+                            $language_code = end($fileinfo);
+                            $key = implode('-', array_slice($fileinfo, 0, -1));
+                            if (strlen($language_code) == 2) {
+                                // debug('key', $key);
+                                if (array_key_exists($key, $result)) {
+                                    $result[$key]['item'][$language_code] = $value;
+                                }
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+    // debug('result', $result);
+    return $result;
+} // get_github_file_structure()
+
 function get_cache($manual_id) {
     $result = array();
-    $result = get_cache_json(MANUAL_CACHE_FILE, $manual_id);
+    if (!MANUAL_FORCE_UPDATE) {
+        $result = get_cache_json(MANUAL_CACHE_FILE, $manual_id);
+    }
     if (empty($result)) {
         $result = array (
             'title' => array (),
@@ -183,7 +228,7 @@ function get_toc($toc_flat) {
 
 function get_toc_html($toc, $manual_id, $language) {
     $result = "";
-    $result .= "<ul>\n";
+    $result .= "<ul class=\"toc\">\n";
     foreach ($toc as $item) {
         $result .= "<li><a href=\"".MANUAL_HTTP_URL."?man=$manual_id&section=".$item['directory']."\">".$item['title'][$language]."</a></li>\n";
         if (array_key_exists('items', $item)) {
@@ -200,7 +245,7 @@ function get_toc_html($toc, $manual_id, $language) {
  */
 function is_published($item, $language, $cache) {
     $filename = $item['directory'].'-'.$language.'.md';
-    $path = $item['directory'].'/'.$filename;
+    $path = 'content/'.$item['directory'].'/'.$filename; // TODO: find a way to set the content/ in a dynamic way
     $result = (
         array_key_exists($path, $cache) && 
         (
@@ -286,17 +331,49 @@ function get_book_files($book_toc, $cache) {
 /**
  * download the files from github
  */
-function downlad_files($file, $manual_id) {
+function downlad_files($file, $manual_id, $cache) {
+    // while (!empty($file)) {
+    // remove each processed file, add the files to be processed for images
+    // }
     foreach ($file as $key => $value) {
+        // if ($key == 'inkscape-userinterface') {
+        // debug('key', $key);
         // debug('value', $value);
         foreach ($value['published'] as $kkey => $vvalue) {
             // debug('vvalue', $vvalue);
             if (!MANUAL_DEBUG_NO_HTTP_REQUEST) {
-                $content = get_content_from_github(GITHUB_URL_RAW.$vvalue['raw']);
+                // debug('http_request content', GITHUB_RAW_URL.$vvalue['raw']);
+                $content = get_content_from_github(GITHUB_RAW_CONTENT_URL.$vvalue['raw']);
             } else {
                 $content = "# Introduction";
+                /*
+                $content = "
+## La fenêtre principale
+
+abcd (defgh) [blah]
+[test](image/inkscape-user_interface-fr.png)
+
+[test a](image/inkscape-user_interface-fr.png)
+                ";
+                */
             }
             // debug('content', $content);
+            // günstigerumzug.ch
+            $matches = array();
+            if (preg_match_all('/!\[(.*?)\]\((.*?)\)/', $content, $matches)) {
+                // debug('matches', $matches);
+                for ($i = 0; $i < count($matches[2]); $i++) {
+                    $item = $matches[2][$i];
+                    if (array_key_exists('content/'.$key.'/'.$item, $cache)) {
+                        // debug('url', GITHUB_RAW_CONTENT_URL.$key.'/'.$item);
+                        $image = get_content_from_github(GITHUB_RAW_CONTENT_URL.$key.'/'.$item);
+                        put_cache($key.'/'.$item, $image, $manual_id);
+                        $content = str_replace('!['.$matches[1][$i].']('.$item.')', '!['.$matches[1][$i].'](cache/'.$manual_id.'/'.$key.'/'.$item.')', $content); // TODO: find a good way to correctly set the pictures and their paths
+                    } else {
+                        Manual_log::$warning[] = "The ".$key.'/'.$item." is referenced but can't be found in the repository";
+                    }
+                }
+            }
             $cache_filename = $vvalue['raw'];
             if (
                 array_key_exists('render', $vvalue) &&
@@ -309,10 +386,11 @@ function downlad_files($file, $manual_id) {
             // debug('content', $content);
             put_cache($cache_filename, $content, $manual_id);
         }
+        // }
     }
 } // downlad_files()
 
-if (!MANUAL_GITHUB_NOREQUEST) {
+if (MANUAL_DEBUG_NO_FILELIST_REQUEST) {
     Manual_log::$warning[] = 'Requests are from the cache: queries to GitHub are disabled.';
 }
 
@@ -337,28 +415,37 @@ if (array_key_exists('man', $_REQUEST) && array_key_exists($_REQUEST['man'], $co
     $config_manual = $config['manual'][$manual_id];
     // debug('config_manual', $config_manual);
 
-    define('GITHUB_URL', strtr(
+    define('GITHUB_FILESLIST_URL', strtr(
         'https://api.github.com/repos/$user/$repository/git/trees/master?recursive=1',
         array(
             '$user' => $config_manual['git_user'],
             '$repository' => $config_manual['git_repository'],
         )
     ));
-    define('GITHUB_URL_RAW', strtr(
+    define('GITHUB_RAW_URL', strtr(
         'https://raw.github.com/$user/$repository/master/',
         array(
             '$user' => $config_manual['git_user'],
             '$repository' => $config_manual['git_repository'],
         )
     ));
+    define('GITHUB_RAW_CONTENT_URL', GITHUB_RAW_URL.$config_manual['git_content_directory'].'/');
 
     $cache = get_cache($manual_id);
     // debug('cache', $cache);
 
-    $content_github = get_github_file_list($config_manual['git_user']);
+    $content_github = get_github_file_list($manual_id);
     // debug('content_github', $content_github);
 
-    // $cache_path = MANUAL_CACHE_PATH.$manual_id.'/';
+    // get the list of chapters in the github directory
+    $github_files = get_github_file_structure($content_github['tree']);
+    // debug('github_files', $github_files);
+
+    foreach ($github_files as $key => $value) {
+        if (empty($value['item'])) {
+            Manual_log::$warning[] = "The $key directory is not empty but contains no chapter files";
+        }
+    }
 
     // check each file on github, compare it to the cache
     $cache_update = array();
@@ -384,11 +471,11 @@ if (array_key_exists('man', $_REQUEST) && array_key_exists($_REQUEST['man'], $co
 
     if (array_key_exists(MANUAL_SOURCE_BOOK_FILE, $cache_update)) {
         if (!MANUAL_DEBUG_NO_HTTP_REQUEST) {
-            $book = get_content_from_github(GITHUB_URL_RAW.MANUAL_SOURCE_BOOK_FILE);
+            // debug('book url', GITHUB_RAW_URL.MANUAL_SOURCE_BOOK_FILE);
+            $book = get_content_from_github(GITHUB_RAW_URL.MANUAL_SOURCE_BOOK_FILE);
         } else {
             $book = file_get_contents('book_github.yaml');
         }
-        // file_put_contents($cache_path.'book.yaml', $book);
         $book = Spyc::YAMLLoadString($book);
         put_cache_json(MANUAL_CACHE_TOC_FILE, $book, $manual_id);
     } else {
@@ -409,7 +496,7 @@ if (array_key_exists('man', $_REQUEST) && array_key_exists($_REQUEST['man'], $co
     // debug('book_language', $book_language);
     put_cache_json(MANUAL_CACHE_LANGUAGE_FILE, $book_language, $manual_id);
 
-    downlad_files($book_files, $manual_id);
+    downlad_files($book_files, $manual_id, $cache);
 
     $book_toc_html = array();
     foreach (array_keys($book_language) as $item) {
