@@ -100,8 +100,8 @@ $content_language = "";
 /*
 if (!empty($config['language'])) {
     $content_language = "<ul>\n";
-    foreach ($config['language'] as $item) {
-        $content_language .= "<li>$item</li>\n";
+    foreach ($config['language'] as $key => $value) {
+        $content_language .= "<li>$value</li>\n";
     }
     $content_language .= "</ul>\n";
 }
@@ -113,24 +113,26 @@ if (!empty($config['language'])) {
 
 
 // TODO: set it as cookie
-$language = array_key_exists('lang', $_REQUEST) ? $_REQUEST['lang'] : MANUAL_LANG_DEFAULT;
+$language_id = array_key_exists('lang', $_REQUEST) ? $_REQUEST['lang'] : MANUAL_LANG_DEFAULT;
 
 function get_config_manual($config, $man) {
     $result = null;
     // debug('config', $config);
-    if (array_key_exists($man, $config['manual'])) {
-        $result = $config['manual'][$man];
+    foreach ($config['manual'] as $item) {
+        if ($item['id'] == $man) {
+            $result = $item;
+        }
     }
     return $result;
 } // get_config_manual()
 
-function get_page($section, $manual_id, $page_id, $language) {
+function get_page($section, $manual_id, $page_id, $language_id) {
     $result = null;
-    // debug('language', $language);
+    // debug('language_id', $language_id);
     // debug('page_id', $page_id);
     // debug('section', $section);
-    if (array_key_exists($page_id, $section) && array_key_exists($language, $section[$page_id]['published'])) {
-        $item = $section[$page_id]['published'][$language];
+    if (array_key_exists($page_id, $section) && array_key_exists($language_id, $section[$page_id]['published'])) {
+        $item = $section[$page_id]['published'][$language_id];
         $filename = 'cache/'.$manual_id.'/'.(array_key_exists('render', $item) ? $item['render']['filename'] : $item['raw']);
         $result = file_get_contents($filename);
     }
@@ -178,26 +180,32 @@ if (isset($config_manual)) :
     // debug('book_toc_html', $book_toc_html);
     if (array_key_exists('section', $_REQUEST)) {
         $page_id = $_REQUEST['section'];
-        $page = get_page($book_section, $manual_id, $page_id, $language);
+        $page = get_page($book_section, $manual_id, $page_id, $language_id);
     }
     // debug('page', $page);
     if (isset($page)) :
-        $navigation[MANUAL_HTTP_URL."?man=$manual_id"] = $config_manual['title'][$language];
+        $navigation[MANUAL_HTTP_URL."?man=$manual_id"] = $config_manual['title'][$language_id];
         $content_title_url = MANUAL_HTTP_URL."?man=$manual_id";
-        $content_title = $config_manual['title'][$language];
+        $content_title = $config_manual['title'][$language_id];
         $content_page = $page;
     else :
-        $content_title = $config_manual['title'][$language];
+        $content_title = $config_manual['title'][$language_id];
         $content_title_url = MANUAL_HTTP_URL."?man=$manual_id";
-        $content_page = $book_toc_html[$language];
+        $content_page = $book_toc_html[$language_id];
     endif;
 
 else :
 
     $content_page .= "<ul class=\"toc\">\n";
     foreach ($config['manual'] as $key => $value) :
-        if (array_key_exists($language, $value['title'])) :
-            $content_page .= "<li><a href=\"".MANUAL_HTTP_URL."?man=".$key."&lang=$language\">".$value['title'][$language]."</a></li>\n";
+        if (array_key_exists($language_id, $value['title'])) :
+            $content_page .= "<li><a href=\"".MANUAL_HTTP_URL."?man=".$value['id']."&lang=$language_id\">".$value['title'][$language_id]."</a></li>\n";
+        else :
+            $content_page .= "<li>";
+            foreach ($value['title'] as $kkey => $vvalue) {
+                $content_page .= "<a href=\"".MANUAL_HTTP_URL."?man=".$value['id']."&lang=$kkey\">".$vvalue."</a> (".$config['language'][$kkey].")\n";
+            }
+            $content_page .= "</li>\n";
         endif;
     endforeach;
     $content_page .= "</ul>\n";

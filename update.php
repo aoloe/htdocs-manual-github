@@ -26,6 +26,7 @@ include('config.php');
 
 // define('MANUAL_MODREWRITE_ENABLED', array_key_exists('HTTP_MOD_REWRITE', $_SERVER));
 define('MANUAL_MODREWRITE_ENABLED', true); // TODO: not used yet
+define('MANUAL_LOCAL_FILES_REQUEST', false); // set to true for debugging purposes only
 define('MANUAL_DEBUG_NO_FILELIST_REQUEST', false); // set to true for debugging purposes only
 define('MANUAL_DEBUG_NO_HTTP_REQUEST', false); // set to true for debugging purposes only
 define('MANUAL_FORCE_UPDATE', true); // set to true for debugging purposes only
@@ -127,11 +128,53 @@ function get_content_from_github($url) {
 } // get_content_from_github()
 
 /**
+ * get the list of files in the local directory
+ */
+function get_local_file_list($manual_id) {
+    $result = array(
+        "sha" => "local",
+        "url" => "whatever",
+        "tree" => array(),
+    );
+    $queue = array(MANUAL_LOCAL_PATH);
+    while (!empty($queue)) {
+        $path = array_shift($queue);
+        // debug('path', $path);
+        // debug('queue', $queue);
+        if ($handle = opendir($path)) {
+            while (false !== ($filename = readdir($handle))) {
+                if ($filename != "." && $filename != ".." && $filename != ".git") {
+                    $item = array (
+                        "mode" => 0,
+                        "type" => "blob",
+                        "sha" => "",
+                        "path" => substr($path, strlen(MANUAL_LOCAL_PATH), strlen($path)).$filename,
+                        "size" => 0,
+                        "url" => "",
+                    );
+                    if (is_dir($path.$filename)) {
+                        $item["type"] = "tree";
+                        $queue[] = $path.$filename.'/';
+                    }
+                    // debug('filename', $filename);
+                    $result['tree'][] = $item;
+                }
+            }
+            closedir($handle);
+        }
+    } // while queue
+    // debug('result', $result);
+    return $result;
+} // get_local_file_list()
+
+/**
  * get the list of files in the github repository through the github API
  */
 function get_github_file_list($manual_id) {
     $result = array();
-    if (!MANUAL_DEBUG_NO_FILELIST_REQUEST) {
+    if (MANUAL_LOCAL_FILES_REQUEST) {
+        $result = get_local_file_list($manual_id);
+    } elseif (!MANUAL_DEBUG_NO_FILELIST_REQUEST) {
         $result = json_decode(get_content_from_github(GITHUB_FILESLIST_URL), true);
         put_cache_json('content_github.json', $result, $manual_id);
     } else {
@@ -230,7 +273,16 @@ function get_toc_html($toc, $manual_id, $language) {
     $result = "";
     $result .= "<ul class=\"toc\">\n";
     foreach ($toc as $item) {
-        $result .= "<li><a href=\"".MANUAL_HTTP_URL."?man=$manual_id&section=".$item['directory']."\">".$item['title'][$language]."</a></li>\n";
+        // debug('item', $item);
+        $result .= "<li>";
+        if (array_key_exists($language, $item['title'])) {
+            $result .= "<a href=\"".MANUAL_HTTP_URL."?man=$manual_id&section=".$item['directory']."&lang=$language\">".$item['title'][$language]."</a>\n";
+        } else {
+            foreach ($item['title'] as $key => $value) {
+                $result .= "<a href=\"".MANUAL_HTTP_URL."?man=$manual_id&section=".$item['directory']."&lang=$key\">".$value."</a>\n";
+            }
+        }
+        $result .= "</li>";
         if (array_key_exists('items', $item)) {
             $result .= get_toc_html($item['items'], $manual_id, $language);
         }
@@ -295,6 +347,8 @@ function get_language($toc, $cache) {
  */
 function get_book_files($book_toc, $cache) {
     $result = array();
+    // debug('book_toc', $book_toc);
+    // debug('cache', $cache);
     foreach ($book_toc as $item) {
         // TODO: only do this if it's not in the book_toc from the cache or it is in the cache_update
         // debug('item', $item);
@@ -341,7 +395,10 @@ function downlad_files($file, $manual_id, $cache) {
         // debug('value', $value);
         foreach ($value['published'] as $kkey => $vvalue) {
             // debug('vvalue', $vvalue);
-            if (!MANUAL_DEBUG_NO_HTTP_REQUEST) {
+            if (MANUAL_LOCAL_FILES_REQUEST) {
+                // debug('vvalue', $vvalue);
+                $content = file_get_contents(MANUAL_LOCAL_CONTENT_PATH.$vvalue['raw']);
+            } elseif (!MANUAL_DEBUG_NO_HTTP_REQUEST) {
                 // debug('http_request content', GITHUB_RAW_URL.$vvalue['raw']);
                 $content = get_content_from_github(GITHUB_RAW_CONTENT_URL.$vvalue['raw']);
             } else {
@@ -358,7 +415,6 @@ abcd (defgh) [blah]
                 */
             }
             // debug('content', $content);
-            // günstigerumzug.ch
             $matches = array();
             if (preg_match_all('/!\[(.*?)\]\((.*?)\)/', $content, $matches)) {
                 // debug('matches', $matches);
@@ -366,7 +422,11 @@ abcd (defgh) [blah]
                     $item = $matches[2][$i];
                     if (array_key_exists('content/'.$key.'/'.$item, $cache)) {
                         // debug('url', GITHUB_RAW_CONTENT_URL.$key.'/'.$item);
-                        $image = get_content_from_github(GITHUB_RAW_CONTENT_URL.$key.'/'.$item);
+                        if (MANUAL_LOCAL_FILES_REQUEST) {
+                            $image = file_get_contents(MANUAL_LOCAL_CONTENT_PATH.$key.'/'.$item);
+                        } else {
+                            $image = get_content_from_github(GITHUB_RAW_CONTENT_URL.$key.'/'.$item);
+                        }
                         put_cache($key.'/'.$item, $image, $manual_id);
                         $content = str_replace('!['.$matches[1][$i].']('.$item.')', '!['.$matches[1][$i].'](cache/'.$manual_id.'/'.$key.'/'.$item.')', $content); // TODO: find a good way to correctly set the pictures and their paths
                     } else {
@@ -408,12 +468,27 @@ if (file_exists('install.php')) {
     Manual_log::$warning[] = 'You should remove the <a href="install.php">install file</a>.';
 }
 
-if (array_key_exists('man', $_REQUEST) && array_key_exists($_REQUEST['man'], $config['manual'])) {
-    $manual_id = $_REQUEST['man'];
+// debug('_REQUEST', $_REQUEST);
+$manual_id = null;
+$config_manual = null;
+if (array_key_exists('man', $_REQUEST)) {
+    foreach ($config['manual'] as $item) {
+        if ($item['id'] == $_REQUEST['man']) {
+            $manual_id = $_REQUEST['man'];
+            $config_manual = $item;
+        }
+    }
+    // debug('config_manual', $config_manual);
+}
+// debug('manual_id', $manual_id);
+if (isset($manual_id)) {
     ensure_directory_writable(MANUAL_CACHE_PATH.$manual_id);
 
-    $config_manual = $config['manual'][$manual_id];
     // debug('config_manual', $config_manual);
+
+    define('MANUAL_LOCAL_PATH', $config_manual['local_path']);
+    define('MANUAL_LOCAL_CONTENT_PATH', MANUAL_LOCAL_PATH.'content/');
+
 
     define('GITHUB_FILESLIST_URL', strtr(
         'https://api.github.com/repos/$user/$repository/git/trees/master?recursive=1',
@@ -469,7 +544,11 @@ if (array_key_exists('man', $_REQUEST) && array_key_exists($_REQUEST['man'], $co
     // debug('cache', $cache);
     // debug('cache_update', $cache_update);
 
-    if (array_key_exists(MANUAL_SOURCE_BOOK_FILE, $cache_update)) {
+    if (MANUAL_LOCAL_FILES_REQUEST) {
+        $book = file_get_contents(MANUAL_LOCAL_PATH.MANUAL_SOURCE_BOOK_FILE);
+        $book = Spyc::YAMLLoadString($book);
+        // put_cache_json(MANUAL_CACHE_TOC_FILE, $book, $manual_id);
+    } elseif (array_key_exists(MANUAL_SOURCE_BOOK_FILE, $cache_update)) {
         if (!MANUAL_DEBUG_NO_HTTP_REQUEST) {
             // debug('book url', GITHUB_RAW_URL.MANUAL_SOURCE_BOOK_FILE);
             $book = get_content_from_github(GITHUB_RAW_URL.MANUAL_SOURCE_BOOK_FILE);
@@ -533,7 +612,7 @@ if ($rate_limit) {
 $form_manual_checkbox = array();
 
 foreach ($config['manual'] as $key => $value) {
-    $form_manual_checkbox[] = "<input type=\"checkbox\" name=\"man\" value=\"$key\" id=\"$key\"><label for=\"$key\">".reset($value['title'])."</label>";
+    $form_manual_checkbox[] = "<input type=\"checkbox\" name=\"man\" value=\"".$value['id']."\" id=\"".$value['id']."\"><label for=\"".$value['id']."\">".reset($value['title'])."</label>";
 }
 
 ?>
